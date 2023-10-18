@@ -22,9 +22,7 @@ use crate::{
   new_blind, membership_gadget,
 };
 
-#[ignore]
-#[test]
-fn bench_membership() {
+pub fn bench_membership() {
   // At a depth of 4, this would be 777,766,321 elements
   // This is exactly tuned to get to the next power of 2, and optimally performant
   let width = 167u64;

@@ -26,7 +26,6 @@ use permissible::Permissible;
 pub mod tree;
 use tree::*;
 
-#[cfg(test)]
 pub mod tests;
 
 pub trait CurveCycle: Clone + Copy + PartialEq + Eq + core::fmt::Debug {
