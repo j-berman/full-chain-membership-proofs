@@ -52,6 +52,7 @@ where
   leaf_randomness: <C::C1 as Ciphersuite>::G,
 
   width: usize,
+  max_size: u64,
   odd_generators: Vec<VectorCommitmentGenerators<T, C::C2>>,
   even_generators: Vec<VectorCommitmentGenerators<T, C::C1>>,
 
@@ -167,6 +168,7 @@ where
       leaf_randomness,
 
       width,
+      max_size,
       odd_generators,
       even_generators,
 
@@ -201,8 +203,16 @@ where
     &self.permissible_c2
   }
 
+  pub(crate) fn leaf_randomness(&self) -> &<C::C1 as Ciphersuite>::G {
+    &self.leaf_randomness
+  }
+
   pub fn width(&self) -> usize {
     self.width
+  }
+
+  pub(crate) fn max_size(&self) -> u64 {
+    self.max_size
   }
 
   pub fn depth(&self) -> usize {

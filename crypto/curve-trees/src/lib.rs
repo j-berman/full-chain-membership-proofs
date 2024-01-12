@@ -291,7 +291,7 @@ pub fn membership_gadget<R: RngCore + CryptoRng, T: 'static + Transcript, C: Cur
 }
 
 pub mod monero {
-  use rand_core::{RngCore, OsRng};
+  use rand_core::OsRng;
 
   use transcript::{Transcript, RecommendedTranscript};
 
@@ -304,8 +304,11 @@ pub mod monero {
 
   use ecip::Ecip;
   use bulletproofs_plus::{
-    Generators, arithmetic_circuit::Circuit, gadgets::elliptic_curve::DLogTable,
+    Generators,
+    arithmetic_circuit::{Circuit, ArithmeticCircuitProof},
+    gadgets::elliptic_curve::DLogTable,
     tests::generators as generators_fn,
+    weighted_inner_product::WipProof,
   };
 
   use crate::{
@@ -338,28 +341,32 @@ pub mod monero {
   }
 
   pub struct Setup {
-    pub pallas_generators: Generators<Pallas>,
-    pub vesta_generators: Generators<Vesta>,
+    pub pallas_generators: Generators<RecommendedTranscript, Pallas>,
+    pub vesta_generators: Generators<RecommendedTranscript, Vesta>,
     pub tree: Tree<RecommendedTranscript, Pasta>,
   }
 
   pub struct Proof {
     pub pallas_commitments: Vec<<<Pasta as CurveCycle>::C1 as Ciphersuite>::G>,
     pub pallas_vector_commitments: Vec<<<Pasta as CurveCycle>::C1 as Ciphersuite>::G>,
-    pub pallas_proof: (),
-    pub pallas_proofs: (),
-    pub vesta_commitments: Vec<<<Pasta as CurveCycle>::C1 as Ciphersuite>::G>,
-    pub vesta_vector_commitments: Vec<<<Pasta as CurveCycle>::C1 as Ciphersuite>::G>,
-    pub vesta_proof: (),
-    pub vesta_proofs: (),
+    pub pallas_proof: ArithmeticCircuitProof<Pallas>,
+    pub pallas_proofs: Vec<(WipProof<Pallas>, WipProof<Pallas>)>,
+    pub vesta_commitments: Vec<<<Pasta as CurveCycle>::C2 as Ciphersuite>::G>,
+    pub vesta_vector_commitments: Vec<<<Pasta as CurveCycle>::C2 as Ciphersuite>::G>,
+    pub vesta_proof: ArithmeticCircuitProof<Vesta>,
+    pub vesta_proofs: Vec<(WipProof<Vesta>, WipProof<Vesta>)>,
   }
 
   pub fn setup() -> Setup {
     const WIDTH: u64 = 167;
-    const MAX_DEPTH: u64 = 4;
+    // This should use a depth of 4, yet that'd take ~128 GB and hours to run
+    // TODO
+    const MAX_DEPTH: u32 = 2;
 
-    let mut pallas_generators = generators_fn::<Pallas>(512 * MAX_DEPTH);
-    let mut vesta_generators = generators_fn::<Vesta>(512 * MAX_DEPTH);
+    let leaf_randomness = <<Pasta as CurveCycle>::C1 as Ciphersuite>::G::random(&mut OsRng);
+
+    let mut pallas_generators = generators_fn::<Pallas>(512 * usize::try_from(MAX_DEPTH).unwrap());
+    let mut vesta_generators = generators_fn::<Vesta>(512 * usize::try_from(MAX_DEPTH).unwrap());
 
     let pallas_h = pallas_generators.h().point();
     let vesta_h = vesta_generators.h().point();
@@ -391,7 +398,7 @@ pub mod monero {
   pub fn prove(
     setup: &Setup,
     point_in_tree: <<Pasta as CurveCycle>::C1 as Ciphersuite>::G,
-  ) -> Proof {
+  ) -> (<<Pasta as CurveCycle>::C1 as Ciphersuite>::G, Proof) {
     let mut transcript = RecommendedTranscript::new(b"Monero Curve Trees Proof");
 
     let blind_c1 = new_blind::<_, Pallas, Vesta>(
@@ -400,7 +407,7 @@ pub mod monero {
       0,
     )
     .0;
-    let blinded_point = point - (setup.pallas_generators.h().point() * blind_c1);
+    let blinded_point = point_in_tree - (setup.pallas_generators.h().point() * blind_c1);
 
     // Prove
     let mut circuit_c1 = Circuit::new(setup.pallas_generators.per_proof(), true);
@@ -419,7 +426,7 @@ pub mod monero {
     transcript.append_message(b"blinded_point", blinded_point.to_bytes());
     transcript.append_message(
       b"tree_root",
-      match tree.root() {
+      match setup.tree.root() {
         Hash::Even(even) => even.to_bytes(),
         Hash::Odd(odd) => odd.to_bytes(),
       },
@@ -430,25 +437,30 @@ pub mod monero {
     let (vesta_commitments, _, vesta_vector_commitments, vesta_proof, vesta_proofs) =
       circuit_c2.prove_with_vector_commitments(&mut OsRng, &mut transcript);
 
-    Proof {
-      pallas_commitments,
-      pallas_vector_commitments,
-      pallas_proof,
-      pallas_proofs,
-      vesta_commitments,
-      vesta_vector_commitments,
-      vesta_proof,
-      vesta_proofs,
-    }
+    (
+      blinded_point,
+      Proof {
+        pallas_commitments,
+        pallas_vector_commitments,
+        pallas_proof,
+        pallas_proofs,
+        vesta_commitments,
+        vesta_vector_commitments,
+        vesta_proof,
+        vesta_proofs,
+      },
+    )
   }
 
   pub fn verify(
     setup: &Setup,
     blinded_point: <<Pasta as CurveCycle>::C1 as Ciphersuite>::G,
     proof: Proof,
-  ) {
-    let mut circuit_c1 = Circuit::new(pallas_generators.per_proof(), false);
-    let mut circuit_c2 = Circuit::new(vesta_generators.per_proof(), false);
+  ) -> bool {
+    let mut transcript = RecommendedTranscript::new(b"Monero Curve Trees Proof");
+
+    let mut circuit_c1 = Circuit::new(setup.pallas_generators.per_proof(), false);
+    let mut circuit_c2 = Circuit::new(setup.vesta_generators.per_proof(), false);
     membership_gadget::<_, _, Pasta>(
       &mut OsRng,
       &mut transcript,
@@ -462,7 +474,7 @@ pub mod monero {
     transcript.append_message(b"blinded_point", blinded_point.to_bytes());
     transcript.append_message(
       b"tree_root",
-      match tree.root() {
+      match setup.tree.root() {
         Hash::Even(even) => even.to_bytes(),
         Hash::Odd(odd) => odd.to_bytes(),
       },
@@ -490,12 +502,12 @@ pub mod monero {
     }
 
     // The caller must check the tree root aligns
-    if (tree.depth() % 2) == 1 {
-      assert_eq!(Hash::Odd(*proof.vesta_vector_commitments.last().unwrap()), tree.root());
+    if (setup.tree.depth() % 2) == 1 {
+      assert_eq!(Hash::Odd(*proof.vesta_vector_commitments.last().unwrap()), setup.tree.root());
       c1_additional.pop();
       c1_additional.pop();
     } else {
-      assert_eq!(Hash::Even(*proof.pallas_vector_commitments.last().unwrap()), tree.root());
+      assert_eq!(Hash::Even(*proof.pallas_vector_commitments.last().unwrap()), setup.tree.root());
       c2_additional.pop();
       c2_additional.pop();
     }
@@ -525,7 +537,8 @@ pub mod monero {
       proof.vesta_proofs,
     );
 
-    assert!(verifier_c1.verify_vartime());
-    assert!(verifier_c2.verify_vartime());
+    debug_assert!(verifier_c1.verify_vartime());
+    debug_assert!(verifier_c2.verify_vartime());
+    verifier_c1.verify_vartime() && verifier_c2.verify_vartime()
   }
 }

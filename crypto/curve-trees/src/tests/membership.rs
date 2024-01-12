@@ -20,6 +20,7 @@ use crate::{
   tree::{Hash, Tree},
   tests::Pasta,
   new_blind, membership_gadget,
+  monero::{Setup, setup, prove, verify},
 };
 
 #[test]
@@ -183,4 +184,34 @@ fn test_membership() {
 
   assert!(verifier_c1.verify_vartime());
   assert!(verifier_c2.verify_vartime());
+}
+
+#[test]
+pub fn test_api() {
+  let mut setup: Setup = setup();
+
+  // Create a full tree (analagous to adding fake enotes to the tree)
+  println!("Creating a full tree of random points...");
+  let mut leaves = vec![];
+  for _ in 0 .. setup.tree.max_size() {
+    leaves.push(<<Pasta as CurveCycle>::C1 as Ciphersuite>::G::random(&mut OsRng));
+  }
+  setup.tree.add_leaves(&leaves);
+  for leaf in leaves.iter_mut() {
+    while !setup.tree.permissible_c1().point(*leaf) {
+      *leaf += setup.tree.leaf_randomness();
+    }
+  }
+
+  // Pick a random leaf from the tree (select the enote)
+  println!("Picking a random leaf from the tree...");
+  let point_in_tree = leaves[usize::try_from(OsRng.next_u64() % (1 << 30)).unwrap() % leaves.len()];
+
+  // Blind the random leaf and prove it is a member of the tree (construct the membership proof)
+  println!("Proving the random leaf is a member of the tree...");
+  let (blinded_point, proof) = prove(&setup, point_in_tree);
+
+  // Verify the membership proof
+  println!("Verifying the membership proof...");
+  assert!(verify(&setup, blinded_point, proof));
 }
