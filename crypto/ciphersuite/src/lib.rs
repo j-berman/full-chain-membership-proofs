@@ -35,6 +35,9 @@ mod pasta;
 #[cfg(feature = "pasta")]
 pub use pasta::*;
 
+#[cfg(feature = "bulletproof25519")]
+mod bulletproof25519;
+
 pub trait UInt:
   PartialEq + From<u8> + ConditionallySelectable + for<'a> crypto_bigint::CheckedAdd<&'a Self>
 {
