@@ -13,26 +13,17 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-rand_core = { version = "0.6", default-features = false }
+rand_core = { version = "0.6", features = ["getrandom"] }
 
 zeroize = { version = "^1.5", default-features = false, features = ["zeroize_derive"] }
 subtle = { version = "^2.4", default-features = false }
 
-transcript = { package = "flexible-transcript", path = "../transcript", version = "0.3" }
-
-pasta_curves = { version = "0.5", default-features = false, features = ["bits", "alloc"], git = "https://github.com/kayabaNerve/pasta_curves.git" }
 multiexp = { path = "../multiexp", default-features = false }
-ciphersuite = { path = "../ciphersuite", default-features = false }
-
-ecip = { path = "../ecip", default-features = false, features = ["pasta"] }
-bulletproofs-plus = { path = "../bulletproofs-plus", default-features = false }
-
-[dev-dependencies]
-rand_core = { version = "0.6", features = ["getrandom"] }
+pasta_curves = { version = "0.5", default-features = false, features = ["bits", "alloc"], git = "https://github.com/kayabaNerve/pasta_curves.git" }
 
 transcript = { package = "flexible-transcript", path = "../transcript", features = ["recommended"] }
 
-ciphersuite = { path = "../ciphersuite", features = ["ristretto", "pasta"] }
+ciphersuite = { path = "../ciphersuite", features = ["ristretto", "pasta", "ed25519", "bulletproof25519"] }
 
-ecip = { path = "../ecip", features = ["pasta"] }
+ecip = { path = "../ecip", features = ["pasta", "ed25519_tower"] }
 bulletproofs-plus = { path = "../bulletproofs-plus", features = ["tests"] }
