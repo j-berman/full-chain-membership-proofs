@@ -229,3 +229,63 @@ mod pasta {
     }
   }
 }
+
+#[cfg(any(test, feature = "ed25519_tower"))]
+mod ed25519_tower {
+  use ciphersuite::{
+    group::ff::Field,
+    Ciphersuite, Ed25519, Bulletproof25519,
+  };
+
+  use crate::Ecip;
+
+  impl Ecip for Ed25519 {
+    type FieldElement = <Bulletproof25519 as Ciphersuite>::F;
+
+    // TODO
+    const A: u64 = 0;
+    const B: u64 = 5;
+
+    fn from_xy(x: Self::FieldElement, y: Self::FieldElement) -> Self::G {
+      // TODO: implement this correctly
+      Self::generator()
+    }
+
+    fn to_xy(
+      _: <Ed25519 as Ciphersuite>::G,
+    ) -> (<Bulletproof25519 as Ciphersuite>::F, <Bulletproof25519 as Ciphersuite>::F) {
+      // TODO: implement this correctly
+      (<Bulletproof25519 as Ciphersuite>::F::ONE, <Bulletproof25519 as Ciphersuite>::F::ONE)
+    }
+
+    // TODO: this is NOT secure, implement a secure hash to curve
+    fn hash_to_G(domain: &str, data: &[u8]) -> Self::G {
+      <Ed25519 as Ciphersuite>::generator() * <Ed25519 as Ciphersuite>::hash_to_F(domain.as_ref(), data)
+    }
+  }
+
+  impl Ecip for Bulletproof25519 {
+    type FieldElement = <Ed25519 as Ciphersuite>::F;
+
+    // TODO
+    const A: u64 = 0;
+    const B: u64 = 5;
+
+    fn from_xy(x: Self::FieldElement, y: Self::FieldElement) -> Self::G {
+      // TODO: implement this correctly
+      Self::generator()
+    }
+
+    fn to_xy(
+      _: <Bulletproof25519 as Ciphersuite>::G,
+    ) -> (<Ed25519 as Ciphersuite>::F, <Ed25519 as Ciphersuite>::F) {
+      // TODO: implement this correctly
+      (<Ed25519 as Ciphersuite>::F::ONE, <Ed25519 as Ciphersuite>::F::ONE)
+    }
+
+    // TODO: this is NOT secure, implement a secure hash to curve
+    fn hash_to_G(domain: &str, data: &[u8]) -> Self::G {
+      <Bulletproof25519 as Ciphersuite>::generator() * <Bulletproof25519 as Ciphersuite>::hash_to_F(domain.as_ref(), data)
+    }
+  }
+}

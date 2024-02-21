@@ -23,6 +23,7 @@ impl Ciphersuite for Bulletproof25519 {
     Point::generator()
   }
 
+  #[allow(non_snake_case)]
   fn hash_to_F(dst: &[u8], msg: &[u8]) -> Self::F {
     let mut hash = Blake2b512::digest(&[dst, msg].concat());
     loop {

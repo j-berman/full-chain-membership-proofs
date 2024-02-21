@@ -11,7 +11,7 @@ mod permissible;
 mod tree;
 
 mod layer;
-mod membership;
+pub mod membership;
 mod bench_membership;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

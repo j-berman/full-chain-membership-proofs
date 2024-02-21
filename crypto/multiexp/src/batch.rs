@@ -11,14 +11,13 @@ use crate::{multiexp, multiexp_vartime};
 
 #[derive(Clone, PartialEq, Eq, Debug, Zeroize)]
 pub enum Point<G: Group> {
-  Constant([u8; 32], G),
+  Constant(Vec<u8>, G),
   Variable(G),
 }
 
 impl<G: Group + GroupEncoding> Point<G> {
   pub fn new_constant(point: G) -> Self {
-    let mut bytes = [0; 32];
-    // TODO: Support curves with non-32-byte reprs
+    let mut bytes: Vec<u8> = vec![0; point.to_bytes().as_mut().len()];
     bytes.copy_from_slice(point.to_bytes().as_ref());
     Point::Constant(bytes, point)
   }
@@ -43,7 +42,7 @@ where
 {
   let mut res: Zeroizing<Vec<(G::Scalar, G)>> = Zeroizing::new(Vec::with_capacity(slice.len()));
 
-  let mut merged: HashMap<[u8; 32], (G::Scalar, G)> = HashMap::new();
+  let mut merged: HashMap<Vec<u8>, (G::Scalar, G)> = HashMap::new();
   for item in slice.iter().flat_map(|pairs| pairs.1.iter()).cloned() {
     let (label, point) = match item.1 {
       Point::Constant(label, point) => (label, point),

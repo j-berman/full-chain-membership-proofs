@@ -21,6 +21,10 @@ use crate::{
   tests::Pasta,
   new_blind, membership_gadget,
   monero::{Setup, setup, prove, verify},
+  ed25519_api::{
+    GeneratorsAndTree, init as ed25519_init, Ed25519Tower, prove as ed25519_prove, verify as ed25519_verify,
+    make_blind,
+  },
 };
 
 #[test]
@@ -214,4 +218,40 @@ pub fn test_api() {
   // Verify the membership proof
   println!("Verifying the membership proof...");
   assert!(verify(&setup, blinded_point, proof));
+}
+
+#[test]
+pub fn test_ed25519() {
+  let mut generators_and_tree: GeneratorsAndTree = ed25519_init();
+
+  // Create a full tree (analagous to adding fake enotes to the tree)
+  println!("Creating a full tree of random points...");
+  let mut leaves = vec![];
+  // for _ in 0 .. state.tree.max_size() {
+  for _ in 0 .. 100 {
+    leaves.push(<<Ed25519Tower as CurveCycle>::C1 as Ciphersuite>::G::random(&mut OsRng));
+  }
+  println!("Adding leaves to the tree...");
+  generators_and_tree.tree.add_leaves(&leaves);
+  println!("Done adding leaves...!");
+  for leaf in leaves.iter_mut() {
+    while !generators_and_tree.tree.permissible_c1().point(*leaf) {
+      *leaf += generators_and_tree.tree.leaf_randomness();
+    }
+  }
+
+  // Pick a random leaf from the tree (select the enote)
+  println!("Picking a random leaf from the tree...");
+  let point_in_tree = leaves[usize::try_from(OsRng.next_u64() % (1 << 30)).unwrap() % leaves.len()];
+
+  // Make random blind
+  let blind = make_blind(&generators_and_tree);
+
+  // Blind the leaf and prove it is a member of the tree (construct the membership proof)
+  println!("Proving the random leaf is a member of the tree...");
+  let (blinded_point, proof) = ed25519_prove(&generators_and_tree, blind, point_in_tree);
+
+  // Verify the membership proof
+  println!("Verifying the membership proof...");
+  assert!(ed25519_verify(&generators_and_tree, blinded_point, &proof));
 }

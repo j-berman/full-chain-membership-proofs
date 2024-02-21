@@ -1,7 +1,7 @@
 use rand_core::OsRng;
 
 use transcript::RecommendedTranscript;
-use ciphersuite::{group::Group, Ciphersuite, Pallas, Vesta};
+use ciphersuite::{group::Group, Ciphersuite, Pallas, Vesta, Ed25519, Bulletproof25519};
 
 use crate::{Generators, padded_pow_of_2, gadgets::elliptic_curve::EmbeddedShortWeierstrass};
 
@@ -63,5 +63,15 @@ impl EmbeddedShortWeierstrass for Pallas {
 
 impl EmbeddedShortWeierstrass for Vesta {
   type Embedded = Pallas;
+  const B: u64 = 5;
+}
+
+impl EmbeddedShortWeierstrass for Ed25519 {
+  type Embedded = Bulletproof25519;
+  const B: u64 = 5;
+}
+
+impl EmbeddedShortWeierstrass for Bulletproof25519 {
+  type Embedded = Ed25519;
   const B: u64 = 5;
 }

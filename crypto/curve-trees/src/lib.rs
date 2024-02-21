@@ -26,7 +26,7 @@ use permissible::Permissible;
 pub mod tree;
 use tree::*;
 
-#[cfg(test)]
+// #[cfg(test)]
 pub mod tests;
 
 pub trait CurveCycle: Clone + Copy + PartialEq + Eq + core::fmt::Debug {
@@ -540,5 +540,275 @@ pub mod monero {
     debug_assert!(verifier_c1.verify_vartime());
     debug_assert!(verifier_c2.verify_vartime());
     verifier_c1.verify_vartime() && verifier_c2.verify_vartime()
+  }
+}
+
+pub mod ed25519_api {
+  use rand_core::OsRng;
+
+  use transcript::{Transcript, RecommendedTranscript};
+
+  use multiexp::BatchVerifier;
+  use ciphersuite::{
+    group::{ff::Field, Group, GroupEncoding},
+    Ciphersuite, Ed25519, Bulletproof25519,
+  };
+
+  use ecip::Ecip;
+  use bulletproofs_plus::{
+    Generators,
+    arithmetic_circuit::{Circuit, ArithmeticCircuitProof},
+    gadgets::elliptic_curve::DLogTable,
+    tests::generators as generators_fn,
+    weighted_inner_product::WipProof,
+  };
+
+  use crate::{
+    CurveCycle,
+    permissible::Permissible,
+    tree::{Hash, Tree},
+    new_blind, membership_gadget,
+  };
+
+  #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+  pub struct Ed25519Tower {}
+  impl CurveCycle for Ed25519Tower {
+    type C1 = Ed25519;
+    type C2 = Bulletproof25519;
+
+    fn c1_coords(
+      _: <Self::C1 as Ciphersuite>::G,
+    ) -> (<Self::C2 as Ciphersuite>::F, <Self::C2 as Ciphersuite>::F) {
+      // TODO: fix this
+      (<Self::C2 as Ciphersuite>::F::ONE, <Self::C2 as Ciphersuite>::F::ONE)
+    }
+    fn c2_coords(
+      _: <Self::C2 as Ciphersuite>::G,
+    ) -> (<Self::C1 as Ciphersuite>::F, <Self::C1 as Ciphersuite>::F) {
+      // TODO: fix this
+      (<Self::C1 as Ciphersuite>::F::ONE, <Self::C1 as Ciphersuite>::F::ONE)
+    }
+  }
+
+  pub struct GeneratorsAndTree {
+    pub ed25519_generators: Generators<RecommendedTranscript, Ed25519>,
+    pub bulletproof25519_generators: Generators<RecommendedTranscript, Bulletproof25519>,
+    pub tree: Tree<RecommendedTranscript, Ed25519Tower>,
+  }
+
+  pub struct Proof {
+    pub ed25519_commitments: Vec<<<Ed25519Tower as CurveCycle>::C1 as Ciphersuite>::G>,
+    pub ed25519_vector_commitments: Vec<<<Ed25519Tower as CurveCycle>::C1 as Ciphersuite>::G>,
+    pub ed25519_proof: ArithmeticCircuitProof<Ed25519>,
+    pub ed25519_proofs: Vec<(WipProof<Ed25519>, WipProof<Ed25519>)>,
+    pub bulletproof25519_commitments: Vec<<<Ed25519Tower as CurveCycle>::C2 as Ciphersuite>::G>,
+    pub bulletproof25519_vector_commitments: Vec<<<Ed25519Tower as CurveCycle>::C2 as Ciphersuite>::G>,
+    pub bulletproof25519_proof: ArithmeticCircuitProof<Bulletproof25519>,
+    pub bulletproof25519_proofs: Vec<(WipProof<Bulletproof25519>, WipProof<Bulletproof25519>)>,
+  }
+
+  pub fn init() -> GeneratorsAndTree {
+    const WIDTH: u64 = 167;
+    // This should use a depth of 4, yet that'd take ~128 GB and hours to run
+    // TODO
+    const MAX_DEPTH: u32 = 2;
+
+    let leaf_randomness = <<Ed25519Tower as CurveCycle>::C1 as Ciphersuite>::G::random(&mut OsRng);
+
+    let mut ed25519_generators = generators_fn::<Ed25519>(512 * usize::try_from(MAX_DEPTH).unwrap());
+    let mut bulletproof25519_generators = generators_fn::<Bulletproof25519>(512 * usize::try_from(MAX_DEPTH).unwrap());
+
+    let ed25519_h = ed25519_generators.h().point();
+    let bulletproof25519_h = bulletproof25519_generators.h().point();
+
+    let permissible_c1 = Permissible::<<Ed25519Tower as CurveCycle>::C1> {
+      h: ed25519_h,
+      alpha: <<Ed25519Tower as CurveCycle>::C1 as Ecip>::FieldElement::random(&mut OsRng),
+      beta: <<Ed25519Tower as CurveCycle>::C1 as Ecip>::FieldElement::random(&mut OsRng),
+    };
+    let permissible_c2 = Permissible::<<Ed25519Tower as CurveCycle>::C2> {
+      h: bulletproof25519_h,
+      alpha: <<Ed25519Tower as CurveCycle>::C2 as Ecip>::FieldElement::random(&mut OsRng),
+      beta: <<Ed25519Tower as CurveCycle>::C2 as Ecip>::FieldElement::random(&mut OsRng),
+    };
+
+    let max = WIDTH.pow(MAX_DEPTH);
+    let tree = Tree::<RecommendedTranscript, Ed25519Tower>::new(
+      permissible_c1,
+      permissible_c2,
+      leaf_randomness,
+      WIDTH.try_into().unwrap(),
+      max,
+    );
+
+    tree.whitelist_vector_commitments(&mut ed25519_generators, &mut bulletproof25519_generators);
+
+    GeneratorsAndTree { tree, ed25519_generators, bulletproof25519_generators }
+  }
+
+  pub fn make_blind(generators_and_tree: &GeneratorsAndTree) -> <Ed25519 as Ciphersuite>::F {
+    let blind_c1 = new_blind::<_, Ed25519, Bulletproof25519>(
+      &mut OsRng,
+      DLogTable::<Ed25519>::new(generators_and_tree.ed25519_generators.h().point()).trits(),
+      0,
+    )
+    .0;
+    blind_c1
+  }
+
+  pub fn prove(
+    generators_and_tree: &GeneratorsAndTree,
+    blind: <Ed25519 as Ciphersuite>::F,
+    point_in_tree: <<Ed25519Tower as CurveCycle>::C1 as Ciphersuite>::G,
+  ) -> (<<Ed25519Tower as CurveCycle>::C1 as Ciphersuite>::G, Proof) {
+    let mut transcript = RecommendedTranscript::new(b"Monero Curve Trees Proof");
+
+    let blind_c1 = blind;
+    let blinded_point = point_in_tree - (generators_and_tree.ed25519_generators.h().point() * blind_c1);
+
+    // Prove
+    let mut circuit_c1 = Circuit::new(generators_and_tree.ed25519_generators.per_proof(), true);
+    let mut circuit_c2 = Circuit::new(generators_and_tree.bulletproof25519_generators.per_proof(), true);
+    membership_gadget::<_, _, Ed25519Tower>(
+      &mut OsRng,
+      &mut transcript,
+      &mut circuit_c1,
+      &mut circuit_c2,
+      &generators_and_tree.tree,
+      Some(blinded_point),
+      Some(blind_c1),
+    );
+
+    // Opportunity to transcript anything else relevant
+    transcript.append_message(b"blinded_point", blinded_point.to_bytes());
+    transcript.append_message(
+      b"tree_root",
+      match generators_and_tree.tree.root() {
+        Hash::Even(even) => even.to_bytes(),
+        Hash::Odd(_) => {
+          // TODO: use odd.to_bytes()
+          let res = [0u8; 32];
+          res
+        },
+      },
+    );
+
+    let (ed25519_commitments, _, ed25519_vector_commitments, ed25519_proof, ed25519_proofs) =
+      circuit_c1.prove_with_vector_commitments(&mut OsRng, &mut transcript);
+    let (bulletproof25519_commitments, _, bulletproof25519_vector_commitments, bulletproof25519_proof, bulletproof25519_proofs) =
+      circuit_c2.prove_with_vector_commitments(&mut OsRng, &mut transcript);
+
+    (
+      blinded_point,
+      Proof {
+        ed25519_commitments,
+        ed25519_vector_commitments,
+        ed25519_proof,
+        ed25519_proofs,
+        bulletproof25519_commitments,
+        bulletproof25519_vector_commitments,
+        bulletproof25519_proof,
+        bulletproof25519_proofs,
+      },
+    )
+  }
+
+  pub fn verify(
+    generators_and_tree: &GeneratorsAndTree,
+    blinded_point: <<Ed25519Tower as CurveCycle>::C1 as Ciphersuite>::G,
+    proof: &Proof,
+  ) -> bool {
+    let mut transcript = RecommendedTranscript::new(b"Monero Curve Trees Proof");
+
+    let mut circuit_c1 = Circuit::new(generators_and_tree.ed25519_generators.per_proof(), false);
+    let mut circuit_c2 = Circuit::new(generators_and_tree.bulletproof25519_generators.per_proof(), false);
+    membership_gadget::<_, _, Ed25519Tower>(
+      &mut OsRng,
+      &mut transcript,
+      &mut circuit_c1,
+      &mut circuit_c2,
+      &generators_and_tree.tree,
+      None,
+      None,
+    );
+
+    transcript.append_message(b"blinded_point", blinded_point.to_bytes());
+    transcript.append_message(
+      b"tree_root",
+      match generators_and_tree.tree.root() {
+        Hash::Even(even) => even.to_bytes(),
+        Hash::Odd(_) => {
+          // TODO: use odd.to_bytes()
+          let res = [0u8; 32];
+          res
+        },
+      },
+    );
+
+    // We need to arrange the points as post-vars
+    let mut c1_additional = vec![];
+    for (i, commitment) in proof.bulletproof25519_vector_commitments.iter().enumerate() {
+      if (i % 2) != 1 {
+        continue;
+      }
+      let coords = Ed25519Tower::c2_coords(*commitment);
+      c1_additional.push(coords.0);
+      c1_additional.push(coords.1);
+    }
+    let blinded_point_coords = Ed25519Tower::c1_coords(blinded_point);
+    let mut c2_additional = vec![blinded_point_coords.0, blinded_point_coords.1];
+    for (i, commitment) in proof.ed25519_vector_commitments.iter().enumerate() {
+      if (i % 2) != 1 {
+        continue;
+      }
+      let coords = Ed25519Tower::c1_coords(*commitment);
+      c2_additional.push(coords.0);
+      c2_additional.push(coords.1);
+    }
+
+    // The caller must check the tree root aligns
+    if (generators_and_tree.tree.depth() % 2) == 1 {
+      assert_eq!(Hash::Odd(*proof.bulletproof25519_vector_commitments.last().unwrap()), generators_and_tree.tree.root());
+      c1_additional.pop();
+      c1_additional.pop();
+    } else {
+      assert_eq!(Hash::Even(*proof.ed25519_vector_commitments.last().unwrap()), generators_and_tree.tree.root());
+      c2_additional.pop();
+      c2_additional.pop();
+    }
+
+    // TODO: Review this capacity
+    let mut verifier_c1 = BatchVerifier::new(3 * 4);
+    let mut verifier_c2 = BatchVerifier::new(3 * 4);
+
+    // TODO: remove clones
+    circuit_c1.verification_statement_with_vector_commitments().verify(
+      &mut OsRng,
+      &mut verifier_c1,
+      &mut transcript,
+      proof.ed25519_commitments.clone(),
+      proof.ed25519_vector_commitments.clone(),
+      c1_additional,
+      proof.ed25519_proof.clone(),
+      proof.ed25519_proofs.clone(),
+    );
+    circuit_c2.verification_statement_with_vector_commitments().verify(
+      &mut OsRng,
+      &mut verifier_c2,
+      &mut transcript,
+      proof.bulletproof25519_commitments.clone(),
+      proof.bulletproof25519_vector_commitments.clone(),
+      c2_additional,
+      proof.bulletproof25519_proof.clone(),
+      proof.bulletproof25519_proofs.clone(),
+    );
+
+    debug_assert!(verifier_c1.verify_vartime());
+    debug_assert!(verifier_c2.verify_vartime());
+    verifier_c1.verify_vartime() && verifier_c2.verify_vartime()
+  }
+
+  pub fn add_leaves(generators_and_tree: &mut GeneratorsAndTree, leaves: &Vec<<<Ed25519Tower as CurveCycle>::C1 as Ciphersuite>::G>) {
+    generators_and_tree.tree.add_leaves(leaves);
   }
 }
